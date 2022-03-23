@@ -1,0 +1,59 @@
+
+trigger: none
+
+pool:
+  name: sysqa-agent-pool
+
+steps:
+ - task: CmdLine@2
+   displayName: Enable ingress addon
+   inputs:
+     script: 'az aks enable-addons -n $(aks_name) -g $(resource_group) -a ingress-appgw --appgw-id $(appgw_id)'
+    
+# - task: CmdLine@2
+#   displayName: register Cert with Agw
+#   inputs:
+#     script: 'az network application-gateway ssl-cert create -n $(cert_name) --gateway-name $(agw_name) --resource-group $(resource_group) --key-vault-secret-id $(key-vault-secret_id)'
+
+ - task: AzureResourceManagerTemplateDeployment@3
+   inputs:
+      deploymentScope: 'Resource Group'
+      azureResourceManagerConnection: 'SQA_azure_connection_admin'
+      subscriptionId: '1f708d02-2a32-4b7b-8b82-4f9357949bb1'
+      action: 'Create Or Update Resource Group'
+      resourceGroupName: 'kfs-sqa-ue-kfsg-rg-paas'
+      location: 'East US'
+      templateLocation: 'Linked artifact'
+      csmFile: '$(Build.SourcesDirectory)/devops_kfsell_sysqa03/template.json'
+      csmParametersFile: '$(Build.SourcesDirectory)/devops_kfsell_sysqa03/parameters.json'
+      deploymentMode: 'Incremental'
+ - task: CmdLine@2
+   inputs:
+     script: 'az network public-ip create -n kfs-sqa-ue-kfsg-ip -g kfs-sqa-ue-kfsg-rg-nw --allocation-method Static --sku Standard'
+ - task: CmdLine@2
+   inputs:
+     script: 'az network application-gateway create --name kfs-sqa-ue-kfsg-apg --resource-group kfs-sqa-ue-kfsg-rg-nw --vnet-name kfs-sqa-ue-kfsg-vnet --subnet kfs-sqa-ue-kfsg-snet-agw --location eastus --max-capacity 2 --min-capacity 10 --public-ip-address kfs-sqa-ue-kfsg-ip --sku WAF_v2'
+ - task: CmdLine@2
+   inputs:
+     script: 'az network application-gateway waf-config set -g kfs-sqa-ue-kfsg-rg-nw --gateway-name kfs-sqa-ue-kfsg-apg --enabled true --firewall-mode Prevention --rule-set-type OWASP --rule-set-version 3.1 --disabled-rules 920300 920440 920310 920311 920320 920330 920350 942130 942260 942370 942390 942400 942430 942440'
+ - task: CmdLine@2
+   inputs:
+     script: "az monitor diagnostic-settings create --name kfs-sqa-ue-kfsg-ap-dig --resource /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.Network/applicationGateways/kfs-sqa-ue-kfsg-apg -g kfs-sqa-ue-kfsg-rg-nw --logs '[{"category": "ApplicationGatewayAccessLog","enabled": true},{"category": "ApplicationGatewayPerformanceLog","enabled": true},{"category": "ApplicationGatewayFirewallLog","enabled": true}]' --metrics '[{"category": "AllMetrics","enabled": true}]' --metrics '[{"category": "AllMetrics","enabled": true}]' --workspace /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourcegroups/kfs-sqa-ue-kfsg-rg-paas/providers/microsoft.operationalinsights/workspaces/kfs-sqa-ue-kfsg-ap-ay"          
+ - task: CmdLine@2
+   inputs:
+     script: 'az network application-gateway identity assign -g kfs-sqa-ue-kfsg-rg-nw --gateway-name kfs-sqa-ue-kfsg-apg --identity /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.ManagedIdentity/userAssignedIdentities/MI-KFSSQA'
+ - task: CmdLine@2
+   inputs:
+     script: 'az network application-gateway ssl-cert create -n kfs-sqa-api --gateway-name kfs-sqa-ue-kfsg-apg  --resource-group kfs-sqa-ue-kfsg-rg-nw --key-vault-secret-id https://kfs-sqa-ue-kfsg-ky-crt.vault.azure.net/secrets/kfs-sqa-api'          
+ - task: CmdLine@2
+   inputs:
+     script: 'az aks create --resource-group kfs-sqa-ue-kfsg-rg-paas --name kfs-sqa-ue-kfsg-aks --network-plugin azure --enable-managed-identity --assign-identity "/subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.ManagedIdentity/userAssignedIdentities/MI-KFSSQA" --assign-kubelet-identity "/subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.ManagedIdentity/userAssignedIdentities/MI-KFSSQA" --vnet-subnet "/subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.Network/virtualNetworks/kfs-sqa-ue-kfsg-vnet/subnets/kfs-sqa-ue-kfsg-snet-aks" --enable-cluster-autoscaler --max-count 10 --min-count 3 --node-vm-size Standard_D4_v3 --service-cidr 192.168.0.0/16 --zones {1,2,3} --dns-service-ip 192.168.0.10'
+ - task: CmdLine@2
+   inputs:
+     script: 'az aks enable-addons --resource-group kfs-sqa-ue-kfsg-rg-paas --name kfs-sqa-ue-kfsg-aks -a ingress-appgw --appgw-id /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourceGroups/kfs-sqa-ue-kfsg-rg-nw/providers/Microsoft.Network/applicationGateways/kfs-sqa-ue-kfsg-apg'          
+ - task: CmdLine@2
+   inputs:
+     script: 'az aks enable-addons -a monitoring -n kfs-sqa-ue-kfsg-aks2 -g kfs-sqa-ue-kfsg-rg-paas'     
+ - task: CmdLine@2
+   inputs:
+     script: "az monitor diagnostic-settings create --name kfs-sqa-ue-kfsg-lg-dig --resource /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourcegroups/kfs-sqa-ue-kfsg-rg-paas/providers/Microsoft.ContainerService/managedClusters/kfs-sqa-ue-kfsg-aks2 --logs '[{"category": "kube-audit","enabled": true},{"category": "kube-apiserver","enabled": true},{"category": "kube-audit-admin","enabled": true},{"category": "kube-controller-manager","enabled": true},{"category": "kube-scheduler","enabled": true},{"category": "cluster-autoscaler","enabled": true},{"category": "cloud-controller-manager","enabled": true},{"category": "guard","enabled": true}]' --metrics '[{"category": "AllMetrics","enabled": true}]' --workspace /subscriptions/1f708d02-2a32-4b7b-8b82-4f9357949bb1/resourcegroups/kfs-sqa-ue-kfsg-rg-paas/providers/microsoft.operationalinsights/workspaces/kfs-sqa-ue-kfsg-lg-ay"               
